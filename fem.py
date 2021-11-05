@@ -6,8 +6,6 @@ import scipy.sparse as spsp
 from scipy.sparse.linalg import spsolve
 import scipy.integrate as integrate
 
-import numba
-from numba import jit, void, int64, float64, uint16
 
 class Mesh:
     def __init__(self, points, triangles, bdy_idx, vol_idx):
