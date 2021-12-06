@@ -2,10 +2,10 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import numpy.linalg as npla
+import jax.numpy.linalg as jnpla
 import scipy.sparse as spsp
 from scipy.sparse.linalg import spsolve
 import scipy.integrate as integrate
-
 
 class Mesh:
     def __init__(self, points, triangles, bdy_idx, vol_idx):
@@ -74,22 +74,26 @@ def stiffness_matrix(v_h, sigma_vec):
     idx_j = np.zeros((v_h.mesh.n_t, 9), dtype  = np.int)
     vals = np.zeros((v_h.mesh.n_t, 9), dtype  = np.float64)
 
+    idx_i = jnp.array(idx_i)
+    idx_j = jnp.array(idx_j)
+    vals = jnp.array(vals)
+
     # Assembly the matrix
     for e in range(v_h.mesh.n_t):  # integration over one triangular element at a time
         # row of t = node numbers of the 3 corners of triangle e
         nodes = t[e,:]
   
         # 3 by 3 matrix with rows=[1 xcorner ycorner] 
-        Pe = np.concatenate([np.ones((3,1)), p[nodes,:]], axis = -1)
+        Pe = jnp.concatenate([np.ones((3,1)), p[nodes,:]], axis = -1)
         # area of triangle e = half of parallelogram area
-        Area = np.abs(npla.det(Pe))/2
+        Area = jnp.abs(jnpla.det(Pe))/2
         # columns of C are coeffs in a+bx+cy to give phi=1,0,0 at nodes
-        C = npla.inv(Pe); 
+        C = jnpla.inv(Pe); 
         # now compute 3 by 3 Ke and 3 by 1 Fe for element e
         grad = C[1:3,:]
         # element matrix from slopes b,c in grad
         S_local = (sigma_vec[e]*Area)*grad.T.dot(grad);
-        
+        print('s_local shape', S_local.shape)
         # add S_local  to 9 entries of global K
         idx_i[e,:] = (np.ones((3,1))*nodes).T.reshape((9,))
         idx_j[e,:] = (np.ones((3,1))*nodes).reshape((9,))
@@ -282,10 +286,9 @@ def dtn_map(v_h, sigma_vec):
     
     # solve interior dof
     # U_vol = spsolve(Sb, Fb)
-    U_vol,_ = jax.scipy.sparse.linalg.cg(lambda x: Sb.dot(x), Fb)
     
-    print(U_vol.shape)
-    # allocate the space for the full solution
+    U_vol,_ = jax.scipy.sparse.linalg.cg(lambda x: Sb.dot(x), Fb)
+        # allocate the space for the full solution
     sol = np.zeros((n_pts,n_bdy_pts))
     
     # write the corresponding values back to the solution
@@ -362,6 +365,103 @@ def misfit_sigma(v_h, Data, sigma_vec):
     grad = M_w*np.sum(Sol_adj_x*Sol_x + Sol_adj_y*Sol_y, axis = 1);
 
     return 0.5*np.sum(np.square(residual)), grad
+
+
+class SolveWithJax:
+    def __init__(self, v_h, Data):
+        '''
+        Initialize v_h (mesh data), Data (reference) etc
+        '''
+        self.v_h = v_h
+        self.Data = Data
+        pass
+
+
+    def misfit_sigma_jax(self, sigma_vec):
+        '''
+        We want AD on this function with respect to sigma_vec
+        '''
+        def stiffness_matrix_jax(sigma_vec):
+            '''
+            This should assemble the stiffness matrix/multiply with sigma_vec    
+            '''
+            pass
+        
+        def dtn_map_jax(S):
+            '''
+            This should take assembled stiffness matrix and solve for sol and DTNMAP 
+            '''
+            pass
+       
+        S = stiffness_matrix_jax(sigma_vec)
+        dtn, sol = dtn_map_jax(S)
+    
+        # compute the residual
+        residual  = -(self.Data - dtn)
+    
+        return 0.5*np.sum(np.square(residual))
+
+class SparseSolver:
+  def __init__(self, meshSpec, bc, iK, jK):
+    self.meshSpec = meshSpec
+    self.iK, self.jK = iK, jK
+    self.bc = bc
+    self.sparseSolver = self.initSolver()
+  #-----------------------#
+  @staticmethod
+  def deleterowcol(A, delrow, delcol):
+    #Assumes that matrix is in symmetric csc form !
+    m = A.shape[0]
+    keep = np.delete (np.arange(0, m), delrow)
+    A = A[keep, :]
+    keep = np.delete (np.arange(0, m), delcol)
+    A = A[:, keep]
+    return A
+  #-----------------------#
+  def initSolver(self):
+    @custom_vjp
+    def solveKuf(Kelem, f):
+      ndof = self.meshSpec['ndof']
+      u=np.zeros((ndof));
+      sK = Kelem.flatten().astype(np.double)
+
+      K = coo_matrix((sK,(self.iK,self.jK)),shape=(ndof,ndof)).tocsc()
+      K = self.deleterowcol(K,self.bc['fixed'],self.bc['fixed']).tocoo()
+      K = cvxopt.spmatrix(K.data.astype(np.double),K.row.astype(np.int),K.col.astype(np.int))
+      B = cvxopt.matrix(f[self.bc['free']])
+      cvxopt.cholmod.linsolve(K,B)
+      u[self.bc['free']]=np.array(B)[:,0]
+      return u
+
+    def solveKuf_fwd(Kelem, f):
+      u = solveKuf(Kelem, f)
+      return u, (Kelem, u)  # save bounds as residuals
+
+    def solveKuf_bwd(res, g):
+      Kelem, u = res
+      gradb = solveKuf(Kelem, g)
+      gradA = -np.einsum('i,i->i',gradb[np.array(self.iK)], \
+                         u[np.array(self.jK)]).\
+                         reshape((self.meshSpec['numElems'],8,8))
+      return (gradA, gradb)  
+    
+    solveKuf.defvjp(solveKuf_fwd, solveKuf_bwd)
+    return solveKuf
+  #-----------------------#
+  def solve(self, Kelem):
+    def solveKuf(Kelem):
+      u = self.sparseSolver(Kelem, self.bc['force'].reshape((-1,1)))
+      return u
+
+    u = solveKuf(Kelem)  
+
+    return u  
+  #-----------------------#
+
+
+
+
+
 
 # if __name__ == "__main__":
 
