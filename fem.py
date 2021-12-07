@@ -6,6 +6,7 @@ import jax.numpy.linalg as jnpla
 import scipy.sparse as spsp
 from scipy.sparse.linalg import spsolve
 import scipy.integrate as integrate
+from jax.test_util import check_grads
 
 class Mesh:
     def __init__(self, points, triangles, bdy_idx, vol_idx):
@@ -68,15 +69,10 @@ def stiffness_matrix(v_h, sigma_vec):
     # define a local handles 
     t = v_h.mesh.t
     p = v_h.mesh.p
-
     # we define the arrays for the indicies and the values 
     idx_i = np.zeros((v_h.mesh.n_t, 9), dtype  = np.int)
     idx_j = np.zeros((v_h.mesh.n_t, 9), dtype  = np.int)
     vals = np.zeros((v_h.mesh.n_t, 9), dtype  = np.float64)
-
-    idx_i = jnp.array(idx_i)
-    idx_j = jnp.array(idx_j)
-    vals = jnp.array(vals)
 
     # Assembly the matrix
     for e in range(v_h.mesh.n_t):  # integration over one triangular element at a time
@@ -84,22 +80,23 @@ def stiffness_matrix(v_h, sigma_vec):
         nodes = t[e,:]
   
         # 3 by 3 matrix with rows=[1 xcorner ycorner] 
-        Pe = jnp.concatenate([np.ones((3,1)), p[nodes,:]], axis = -1)
+        Pe = np.concatenate([np.ones((3,1)), p[nodes,:]], axis = -1)
         # area of triangle e = half of parallelogram area
-        Area = jnp.abs(jnpla.det(Pe))/2
+        Area = np.abs(jnpla.det(Pe))/2
         # columns of C are coeffs in a+bx+cy to give phi=1,0,0 at nodes
-        C = jnpla.inv(Pe); 
+        C = npla.inv(Pe); 
         # now compute 3 by 3 Ke and 3 by 1 Fe for element e
         grad = C[1:3,:]
         # element matrix from slopes b,c in grad
-        S_local = (sigma_vec[e]*Area)*grad.T.dot(grad);
-        print('s_local shape', S_local.shape)
+        S_local = (1*Area)*grad.T.dot(grad);
+        # print('s_local shape', S_local.shape)
         # add S_local  to 9 entries of global K
         idx_i[e,:] = (np.ones((3,1))*nodes).T.reshape((9,))
         idx_j[e,:] = (np.ones((3,1))*nodes).reshape((9,))
         vals[e,:] = S_local.reshape((9,))
 
     # we add all the indices to make the matrix
+    vals = np.einsum('i,ij->ij', sigma_vec.reshape((-1)), vals)
     S_coo = spsp.coo_matrix((vals.reshape((-1,)), 
                             (idx_i.reshape((-1,)), 
                              idx_j.reshape((-1,)))), shape=(v_h.dim, v_h.dim))
@@ -271,23 +268,27 @@ def dtn_map(v_h, sigma_vec):
 
     vol_idx = v_h.mesh.vol_idx
     bdy_idx = v_h.mesh.bdy_idx
-
+    
     # build the stiffness matrix
     S = stiffness_matrix(v_h, sigma_vec)
-    
     # reduced Stiffness matrix (only volumetric dof)
     Sb = spsp.csr_matrix(S[vol_idx,:][:,vol_idx])
-    Sb = jnp.array(Sb.todense())
+    
+    # Sb = jnp.array(Sb.todense())
+    
+    # print('sb shape', Sb.shape)
     # the boundary data are just direct deltas at each node
     bdy_data = np.eye(n_bdy_pts)
-    
+    # print("bdy data shape", bdy_data.shape)
+# 
     # building the rhs for the linear system
     Fb = -S[vol_idx,:][:,bdy_idx]*bdy_data
-    
+    # print('Svol,bdy shape', (S[vol_idx,:][:,bdy_idx].todense()).shape)
+    # print("fb shape", Fb.shape)
     # solve interior dof
-    # U_vol = spsolve(Sb, Fb)
+    U_vol = spsolve(Sb, Fb)
     
-    U_vol,_ = jax.scipy.sparse.linalg.cg(lambda x: Sb.dot(x), Fb)
+    # U_vol,_ = jax.scipy.sparse.linalg.cg(lambda x: Sb.dot(x), Fb)
         # allocate the space for the full solution
     sol = np.zeros((n_pts,n_bdy_pts))
     
@@ -374,32 +375,185 @@ class SolveWithJax:
         '''
         self.v_h = v_h
         self.Data = Data
-        pass
+        self.K0, self.nodeIdx = self.computeK0();
 
+    def computeK0(self):
+        t = self.v_h.mesh.t
+        p = self.v_h.mesh.p
+        # we define the arrays for the indicies and the values 
+        idx_i = np.zeros((self.v_h.mesh.n_t, 9), dtype  = np.int)
+        idx_j = np.zeros((self.v_h.mesh.n_t, 9), dtype  = np.int)
+        K0 = np.zeros((self.v_h.mesh.n_t, 9), dtype  = np.float64)
+
+        # Assembly the matrix
+        for e in range(self.v_h.mesh.n_t):  # integration over one triangular element at a time
+            # row of t = node numbers of the 3 corners of triangle e
+            nodes = t[e,:]
+      
+            # 3 by 3 matrix with rows=[1 xcorner ycorner] 
+            Pe = np.concatenate([np.ones((3,1)), p[nodes,:]], axis = -1)
+            # area of triangle e = half of parallelogram area
+            Area = np.abs(npla.det(Pe))/2
+            # columns of C are coeffs in a+bx+cy to give phi=1,0,0 at nodes
+            C = npla.inv(Pe); 
+            # now compute 3 by 3 Ke and 3 by 1 Fe for element e
+            grad = C[1:3,:]
+            # element matrix from slopes b,c in grad
+            S_local = (1*Area)*grad.T.dot(grad);
+            # print('s_local shape', S_local.shape)
+            # add S_local  to 9 entries of global K
+            idx_i[e,:] = (np.ones((3,1))*nodes).T.reshape((9,))
+            idx_j[e,:] = (np.ones((3,1))*nodes).reshape((9,))
+            K0[e,:] = S_local.reshape((9,))
+            nodeIdx = jax.ops.index[idx_i.reshape((-1)),idx_j.reshape((-1))]
+        return K0, nodeIdx
 
     def misfit_sigma_jax(self, sigma_vec):
         '''
         We want AD on this function with respect to sigma_vec
         '''
-        def stiffness_matrix_jax(sigma_vec):
+        def stiffness_matrix(sigma_vec):
             '''
             This should assemble the stiffness matrix/multiply with sigma_vec    
             '''
-            pass
-        
-        def dtn_map_jax(S):
+            K_asm = jnp.zeros((self.v_h.mesh.n_p, self.v_h.mesh.n_p)) 
+            K_elem = jnp.einsum('i,ij-> ij', sigma_vec, self.K0).flatten() # Might need T
+            K_asm = jax.ops.index_add(K_asm, self.nodeIdx, K_elem) 
+            return K_asm
+        #-----------------------#
+        def dtn_map(K_asm):
             '''
             This should take assembled stiffness matrix and solve for sol and DTNMAP 
             '''
-            pass
-       
-        S = stiffness_matrix_jax(sigma_vec)
-        dtn, sol = dtn_map_jax(S)
-    
+            n_bdy_pts = len(self.v_h.mesh.bdy_idx)
+            n_pts  = self.v_h.mesh.p.shape[0]
+
+            vol_idx = self.v_h.mesh.vol_idx
+            bdy_idx = self.v_h.mesh.bdy_idx
+
+            # build the stiffness matrix
+           
+            # reduced Stiffness matrix (only volumetric dof)
+            Sb = (K_asm[vol_idx,:][:,vol_idx])
+            
+            # the boundary data are just direct deltas at each node
+            bdy_data = np.eye(n_bdy_pts)
+            
+            # building the rhs for the linear system
+            # Fb = -K_asm[vol_idx,:][:,bdy_idx]*bdy_data
+            
+            Fb = jnp.einsum('ij,jk-> ik', -K_asm[vol_idx,:][:,bdy_idx], bdy_data)
+            
+            # solve interior dof
+            # U_vol = spsolve(Sb, Fb)
+            
+            U_vol = jax.scipy.linalg.solve\
+                (Sb, Fb, sym_pos = True, check_finite=False) # 301, 61
+                
+            sol = jnp.zeros((n_pts,n_bdy_pts)) # 362,61
+            
+            sol = jax.ops.index_add(sol, jnp.index_exp[vol_idx,:], U_vol)
+            sol = jax.ops.index_add(sol, np.index_exp[bdy_idx,:], bdy_data)
+
+                # allocate the space for the full solution
+            # sol = np.zeros((n_pts,n_bdy_pts))
+            
+            # # write the corresponding values back to the solution
+            # sol[bdy_idx,:] = bdy_data
+            # sol[vol_idx,:] = U_vol
+        
+            # computing the flux
+            # flux = S.dot(sol);
+            flux = jnp.einsum('ij,jk->ik', K_asm, sol)
+            # extracting the boundary data of the flux 
+            DtN = flux[bdy_idx, :]
+        
+            return DtN, sol
+        #-----------------------#
+        K_asm = stiffness_matrix(sigma_vec)
+        dtn, sol = dtn_map(K_asm)
         # compute the residual
         residual  = -(self.Data - dtn)
-    
-        return 0.5*np.sum(np.square(residual))
+        objective = 0.5*jnp.sum(jnp.square(residual))
+        return objective
+        #-----------------------#
+        
+    def dtn_map_jax(self, sigma_vec):
+        def stiffness_matrix(sigma_vec):
+            '''
+            This should assemble the stiffness matrix/multiply with sigma_vec    
+            '''
+            K_asm = jnp.zeros((self.v_h.mesh.n_p, self.v_h.mesh.n_p)) 
+            K_elem = jnp.einsum('i,ij-> ij', sigma_vec, self.K0).flatten() # Might need T
+            K_asm = jax.ops.index_add(K_asm, self.nodeIdx, K_elem) 
+            return K_asm
+        #-----------------------#
+        def dtn_map(K_asm):
+        
+            '''
+            This should take assembled stiffness matrix and solve for sol and DTNMAP 
+            '''
+            n_bdy_pts = len(self.v_h.mesh.bdy_idx)
+            n_pts  = self.v_h.mesh.p.shape[0]
+
+            vol_idx = self.v_h.mesh.vol_idx
+            bdy_idx = self.v_h.mesh.bdy_idx
+
+            # build the stiffness matrix
+           
+            # reduced Stiffness matrix (only volumetric dof)
+            Sb = (K_asm[vol_idx,:][:,vol_idx])
+            
+            # the boundary data are just direct deltas at each node
+            bdy_data = np.eye(n_bdy_pts)
+            
+            # building the rhs for the linear system
+            # Fb = -K_asm[vol_idx,:][:,bdy_idx]*bdy_data
+            
+            Fb = jnp.einsum('ij,jk-> ik', -K_asm[vol_idx,:][:,bdy_idx], bdy_data)
+            
+            # solve interior dof
+            # U_vol = spsolve(Sb, Fb)
+            
+            U_vol = jax.scipy.linalg.solve\
+                (Sb, Fb, sym_pos = True, check_finite=False) # 301, 61
+                
+            sol = jnp.zeros((n_pts,n_bdy_pts)) # 362,61
+            
+            sol = jax.ops.index_add(sol, jnp.index_exp[vol_idx,:], U_vol)
+            sol = jax.ops.index_add(sol, np.index_exp[bdy_idx,:], bdy_data)
+
+                # allocate the space for the full solution
+            # sol = np.zeros((n_pts,n_bdy_pts))
+            
+            # # write the corresponding values back to the solution
+            # sol[bdy_idx,:] = bdy_data
+            # sol[vol_idx,:] = U_vol
+        
+            # computing the flux
+            # flux = S.dot(sol);
+            flux = jnp.einsum('ij,jk->ik', K_asm, sol)
+            # extracting the boundary data of the flux 
+            DtN = flux[bdy_idx, :]
+        
+            return DtN, sol
+        
+        K_asm = stiffness_matrix(sigma_vec);
+        dtn, sol = dtn_map(K_asm)
+        return dtn, sol
+        #-----------------------#
+
+
+
+
+
+
+
+    def check_gradJAX(self, sigma_vec):
+        return check_grads(self.misfit_sigma_jax, (sigma_vec), order=2)
+        #-----------------------#
+
+        
 
 class SparseSolver:
   def __init__(self, meshSpec, bc, iK, jK):
@@ -513,6 +667,7 @@ class SparseSolver:
 
 #     # print the error
 #     print("L^2 error using %d points is %.6f" % (v_h.dim, l2_err))
+
 
 
 
