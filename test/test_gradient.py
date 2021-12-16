@@ -38,11 +38,9 @@ mesh = Mesh(p, t, bdy_idx, vol_idx)
 v_h = V_h(mesh)
 
 sigma_vec = mat_contents['sigma_vec']
-print(sigma_vec.shape)	
 
 # this is going to be our referecnes (or data)
 dtn_data, sol = dtn_map(v_h, sigma_vec)
-print(dtn_data)
 # fix dtn_map
 
 # useful for debugging

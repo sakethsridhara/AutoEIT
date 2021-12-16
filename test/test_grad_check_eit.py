@@ -67,8 +67,8 @@ err_grad = grad-grad_ref.reshape((-1,))
 assert npla.norm(err_grad)/npla.norm(grad_ref.reshape((-1,))) < 1.e-12
 print("Error with respect to the reference gradient is %.4e" % npla.norm(err_grad))
 
-assert np.abs(misfit - misfit_ref) < 1.e-12
-print("Error with respect to the reference misfit is %.4e" % np.abs(misfit - misfit_ref))
+assert np.abs(loss - misfit_ref) < 1.e-12
+print("Error with respect to the reference misfit is %.4e" % np.abs(loss - misfit_ref))
 
 # computing the DtN map
 dtn, sol = dtn_map(v_h, sigma_vec)

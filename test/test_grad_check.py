@@ -114,8 +114,6 @@ assert err_DtN < 1.e-4
 print("Error of the DtN maps with respect to reference %.4e" % err_DtN)
 
 
-sys.exit()
-
 def misfit_simple(v_h, dtn_data, sigma_vec):
 	# compute dtn and sol for given sigma
     dtn, sol = dtn_map(v_h, sigma_vec)
@@ -148,13 +146,13 @@ def J(x):
 
 # we define a relatively high tolerance
 # recall that this is the square of the misfit
-opt_tol = 1.e-6
+opt_tol = 1.e-9
 
 # running the optimization routine
-res = op.minimize(J, sigma_vec_0, #method='L-BFGS-B',
+res = op.minimize(J, sigma_vec_0, method='L-BFGS-B',
                    jac = True,
                    options={'eps': opt_tol, 
-                   			'maxiter': 500,
+                   			'maxiter': 700,
                    			'disp': True})
 
 # extracting guess from the resulting optimization 

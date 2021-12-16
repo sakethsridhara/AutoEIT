@@ -13,6 +13,7 @@ import jax.numpy as jnp
 from jax.scipy import optimize
 
 import scipy.optimize as op
+from time import perf_counter
 
 import os
 import sys
@@ -60,14 +61,12 @@ sigma_vec = jnp.array(sigma_vec)
 print('---------------START---------------')
 swj = SolveWithJax(v_h, dtn_data)
 
-misfit = swj.misfit_sigma_jax(sigma_vec_0)
+# misfit = swj.misfit_sigma_jax(sigma_vec_0)
 
 misfit, grad = value_and_grad(swj.misfit_sigma_jax)(sigma_vec_0)
 
 
 # swj.check_gradJAX(sigma_vec_0)  # check up to 2nd order derivatives
-print('---------------DONE AD CHECK---------------')
-
 
 # the reference grad
 grad_ref = mat_contents['grad']
@@ -82,6 +81,7 @@ assert npla.norm(err_grad)/npla.norm(grad_ref.reshape((-1,))) < 1.e-4
 print("Error with respect to the reference gradient is %.4e" % npla.norm(err_grad))
 
 
+
 check_grad = False
 
 # this may be very slow
@@ -92,13 +92,14 @@ if check_grad:
 		return swj.misfit_sigma_jax(sigma)
 
 	def grad_fn(sigma):
-		return grad(swj.misfit_sigma_jax, 1)(sigma)
+		return grad(swj.misfit_sigma_jax)(sigma)
 
 	err = op.check_grad(misfit_fn, grad_fn, sigma_vec_0)
 
 	print("Error of the gradient wrt FD approximation %.4e" %err)
+    print('---------------DONE AD CHECK---------------')
 
-print('---------------DONE AD CHECK---------------')
+
 
 
 dtn, sol = swj.dtn_map_jax(sigma_vec)
@@ -124,13 +125,16 @@ def J(x):
 
 # we define a relatively high tolerance
 # recall that this is the square of the misfit
-opt_tol = 1.e-6
+opt_tol = 1.e-9
 
+print('---------------START OPT---------------')
+start = perf_counter()
 # running the optimization routine
 res = jax.scipy.optimize.minimize(J, sigma_vec_0, method = "BFGS", tol = opt_tol,\
-                   options={'maxiter': 500})
-
-print('---------------DONE OPTTTT---------------')
+                   options={'maxiter': 1000})
+stop = perf_counter()
+print("Elapsed time during the OPT in seconds:",stop-start)
+print('---------------DONE OPT---------------')
 
 # extracting guess from the resulting optimization 
 sigma_guess = res.x
