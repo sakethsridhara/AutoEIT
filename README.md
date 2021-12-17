@@ -1,6 +1,8 @@
 # AutoEIT
 An automatic differentiation framework for solving the inverse EIT problem using JAX. 
-This work (in progress) is for the MATH714 course project at UW Madison, Fall 2021.
+This work is for the MATH714 course project at UW Madison, Fall 2021.
+
+Refer test files with _jax_ titles for JAX implementations.
 
 Code adopted and modified from https://github.com/Forgotten/EIT 
 Includes other software related under the MIT license:
