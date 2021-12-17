@@ -55,8 +55,6 @@ eit.update_matrices(sigma_vec_0)
 # testing the loss and grad 
 loss, grad = eit.misfit(dtn_data, sigma_vec_0)
 
-print(np.min(grad))
-print(np.max(grad))
 
 
 # simple optimization routine

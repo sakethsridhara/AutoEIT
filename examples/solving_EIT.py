@@ -8,6 +8,7 @@ import scipy.sparse as spsp
 from scipy.sparse.linalg import spsolve
 
 import scipy.optimize as op
+from time import perf_counter
 
 import os
 import sys
@@ -54,15 +55,19 @@ def J(x):
 # we define a relatively high tolerance
 # recall that this is the square of the misfit
 opt_tol = 1e-9
+
 print('---------------START OPT---------------')
+start = perf_counter()
 
 # running the optimization routine
 res = op.minimize(J, sigma_vec_0,# method='Newton-CG',
                    jac = True,
                    tol = opt_tol,
                    options={'maxiter': 500,
-                   			'disp': True})
+                   			'disp': False})
+stop = perf_counter()
 
+print("Elapsed time during the OPT in seconds:",stop-start)
 # extracting guess from the resulting optimization 
 sigma_guess = res.x
 

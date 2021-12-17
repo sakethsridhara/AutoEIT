@@ -9,6 +9,7 @@ from scipy.optimize import Bounds
 from jax_minimize_wrapper import minimize
 
 from scipy.sparse.linalg import spsolve
+from time import perf_counter
 
 import scipy.optimize as op
 
@@ -87,11 +88,14 @@ print('---------------START OPT---------------')
 
 
 #TYPE 2 #comes from the minimize wrapper
+start = perf_counter()
 
 res = minimize(J, sigma_vec_0, method = "L-BFGS-B", bounds = bounds, tol = opt_tol, options={'maxiter': 200,
-          'disp': True})
+          'disp': False})
 
+stop = perf_counter()
 
+print("Elapsed time during the OPT in seconds:",stop-start)
 # Type -3 Works but slow
 # res = op.minimize(J1, sigma_vec_0, method='L-BFGS-B',
 #                     jac = True,
