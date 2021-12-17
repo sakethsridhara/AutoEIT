@@ -8,6 +8,7 @@ import scipy.sparse as spsp
 from scipy.sparse.linalg import spsolve
 
 import scipy.optimize as op
+from time import perf_counter
 
 import os
 import sys
@@ -37,11 +38,10 @@ mesh = Mesh(p, t, bdy_idx, vol_idx)
 # define the approximation space
 v_h = V_h(mesh)
 
-sigma_vec = mat_contents['sigma_vec']
+sigma_vec = mat_contents['sigma_vec']	
 
 # this is going to be our referecnes (or data)
 dtn_data, sol = dtn_map(v_h, sigma_vec)
-# fix dtn_map
 
 # useful for debugging
 if plot_bool: 
@@ -97,11 +97,16 @@ def J(x):
 opt_tol = 1.e-6
 
 # running the optimization routine
+start = perf_counter()
+
 res = op.minimize(J, sigma_vec_0, #method='L-BFGS-B',
                    jac = True,
                    options={'eps': opt_tol, 
                    			'maxiter': 1000,
-                   			'disp': True})
+                   			'disp': False})
+stop = perf_counter()
+
+print("Elapsed time during the OPT in seconds:",stop-start)
 
 # extracting guess from the resulting optimization 
 sigma_guess = res.x
@@ -115,7 +120,7 @@ sigma_v = spsolve(Mass, p_v_w@sigma_guess)
 # create a triangulation object 
 triangulation = tri.Triangulation(p[:,0], p[:,1], t)
 # plot the triangles
-plt.triplot(triangulation, '-k')
+# plt.triplot(triangulation, '-k')
 # plotting the solution 
 plt.tricontourf(triangulation, sigma_v)
 # plotting a colorbar

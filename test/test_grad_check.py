@@ -6,11 +6,9 @@ import numpy as np
 import numpy.linalg as npla
 import scipy.sparse as spsp
 from scipy.sparse.linalg import spsolve
-import jax
-from jax import value_and_grad
-import jax.numpy as jnp
 
 import scipy.optimize as op
+from time import perf_counter
 
 import os
 import sys
@@ -22,7 +20,6 @@ plot_bool = False
 
 # loading the file containing the mesh
 mat_fname  = 'data/data_test.mat'
-
 mat_contents = sio.loadmat(mat_fname)
 
 # points
@@ -41,76 +38,37 @@ mesh = Mesh(p, t, bdy_idx, vol_idx)
 # define the approximation space
 v_h = V_h(mesh)
 
-sigma_vec = mat_contents['sigma_vec'].astype(np.float64).reshape((-1,))
-sigma_vec_0 = mat_contents['sigma_0'].astype(np.float64).reshape((-1,)) # 661
+sigma_vec = mat_contents['sigma_vec'].astype(np.float64)
+sigma_vec_0 = mat_contents['sigma_0'].astype(np.float64).reshape((-1,))
+
 dtn_data = mat_contents['DtN'].astype(np.float64)
 
 # computing misfit and grad
-# misfit, grad = misfit_sigma(v_h, dtn_data, sigma_vec_0)
-
-
-sigma_vec_0 = jnp.array(sigma_vec_0)
-sigma_vec = jnp.array(sigma_vec)
-
-
-# dtn_data = jnp.array(dtn_data)
-
-print('---------------START---------------')
-swj = SolveWithJax(v_h, dtn_data)
-
-misfit = swj.misfit_sigma_jax(sigma_vec_0)
-
-misfit, grad = value_and_grad(swj.misfit_sigma_jax)(sigma_vec_0)
-
-
-# swj.check_gradJAX(sigma_vec_0)  # check up to 2nd order derivatives
-print('---------------DONE AD CHECK---------------')
-
+misfit, grad = misfit_sigma(v_h, dtn_data, sigma_vec_0)
 
 # the reference grad
 grad_ref = mat_contents['grad']
+
 # the reference misfit
 misfit_ref = mat_contents['l2']
 
 err_grad = grad-grad_ref.reshape((-1,))
 
-assert np.abs(misfit - misfit_ref) < 1.e-4
-print("Error with respect to the reference misfit is %.4e" % np.abs(misfit - misfit_ref))
-assert npla.norm(err_grad)/npla.norm(grad_ref.reshape((-1,))) < 1.e-4
+assert npla.norm(err_grad)/npla.norm(grad_ref.reshape((-1,))) < 1.e-12
 print("Error with respect to the reference gradient is %.4e" % npla.norm(err_grad))
 
-
-check_grad = False
-
-# this may be very slow
-if check_grad:
-
-	# this is very inefficient
-	def misfit_fn(sigma):
-		return swj.misfit_sigma_jax(sigma)
-
-	def grad_fn(sigma):
-		return grad(swj.misfit_sigma_jax, 1)(sigma)
-
-	err = op.check_grad(misfit_fn, grad_fn, sigma_vec_0)
-
-	print("Error of the gradient wrt FD approximation %.4e" %err)
-
-print('---------------DONE AD CHECK---------------')
-
-
-dtn, sol = swj.dtn_map_jax(sigma_vec)
-
+assert np.abs(misfit - misfit_ref) < 1.e-12
+print("Error with respect to the reference misfit is %.4e" % np.abs(misfit - misfit_ref))
 
 # 
-# dtn, sol = dtn_map(v_h, sigma_vec)
+dtn, sol = dtn_map(v_h, sigma_vec)
 
 dtn_ref = mat_contents['DtN']	
 
 err_DtN_vec = dtn - dtn_ref
 err_DtN = npla.norm(err_DtN_vec.reshape((-1,)))/npla.norm(dtn_ref.reshape((-1,)))
 
-assert err_DtN < 1.e-4
+assert err_DtN < 1.e-12
 print("Error of the DtN maps with respect to reference %.4e" % err_DtN)
 
 
@@ -123,7 +81,7 @@ def misfit_simple(v_h, dtn_data, sigma_vec):
 
     return 0.5*np.sum(np.square(residual))
 
-check_grad = False
+check_grad = True
 
 # this may be very slow
 if check_grad:
@@ -146,14 +104,17 @@ def J(x):
 
 # we define a relatively high tolerance
 # recall that this is the square of the misfit
-opt_tol = 1.e-9
+opt_tol = 1.e-6
+start = perf_counter()
 
 # running the optimization routine
-res = op.minimize(J, sigma_vec_0, method='L-BFGS-B',
+res = op.minimize(J, sigma_vec_0, #method='L-BFGS-B',
                    jac = True,
                    options={'eps': opt_tol, 
-                   			'maxiter': 700,
-                   			'disp': True})
+                   			'maxiter': 500,
+                   			'disp': False})
+stop = perf_counter()
+print("Elapsed time during the OPT in seconds:",stop-start)
 
 # extracting guess from the resulting optimization 
 sigma_guess = res.x

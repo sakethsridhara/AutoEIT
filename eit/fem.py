@@ -12,7 +12,8 @@ import scipy.integrate as integrate
 from jax.test_util import check_grads
 from scipy.sparse import coo_matrix
 from functools import partial
-
+from jax.config import config
+config.update("jax_enable_x64", True)
 class Mesh:
     def __init__(self, points, triangles, bdy_idx, vol_idx):
         # self.p    array with the node points (sorted)

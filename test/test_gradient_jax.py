@@ -11,6 +11,7 @@ import jax
 from jax import value_and_grad
 
 import scipy.optimize as op
+from time import perf_counter
 
 import os
 import sys
@@ -109,10 +110,14 @@ def J(x):
 # we define a relatively high tolerance
 # recall that this is the square of the misfit
 opt_tol = 1.e-6
+start = perf_counter()
 
 # running the optimization routine
 res = jax.scipy.optimize.minimize(J, sigma_vec_0, method = "BFGS", tol = opt_tol,\
                    options={'maxiter': 1000})
+stop = perf_counter()
+
+print("Elapsed time during the OPT in seconds:",stop-start)
 
 # extracting guess from the resulting optimization 
 sigma_guess = res.x
@@ -126,7 +131,7 @@ sigma_v = spsolve(Mass, p_v_w@sigma_guess)
 # create a triangulation object 
 triangulation = tri.Triangulation(p[:,0], p[:,1], t)
 # plot the triangles
-plt.triplot(triangulation, '-k')
+# plt.triplot(triangulation, '-k')
 # plotting the solution 
 plt.tricontourf(triangulation, sigma_v)
 # plotting a colorbar
